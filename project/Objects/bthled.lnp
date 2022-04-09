@@ -1,0 +1,4 @@
+".\Objects\STARTUP.obj",
+".\Objects\main3.obj" 
+TO ".\Objects\bthled" 
+PRINT(".\Listings\bthled.m51") RAMSIZE(256) 

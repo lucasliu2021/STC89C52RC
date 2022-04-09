@@ -1,0 +1,203 @@
+C51 COMPILER V9.60.0.0   MAIN3                                                             12/06/2021 22:03:48 PAGE 1   
+
+
+C51 COMPILER V9.60.0.0, COMPILATION OF MODULE MAIN3
+OBJECT MODULE PLACED IN .\Objects\main3.obj
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE src\main3.c OPTIMIZE(8,SPEED) BROWSE DEBUG OBJECTEXTEND PRINT(.\Listings
+                    -\main3.lst) TABS(2) OBJECT(.\Objects\main3.obj)
+
+line level    source
+
+   1          #include <reg52.h>
+   2          #define uchar unsigned char
+   3          void Timer0_Init();          // PWM波定时器
+   4          void Timer1_Init();          //串口
+   5          void Timer2_Init();          //超时检测定时
+   6          void make();                 //数据处理
+   7          void resettime();            //超时检测
+   8          void send();                 //响应信息
+   9          sfr T2MOD = 0xC9;            //定时器2寄存器地址
+  10          sbit LED6 = P0 ^ 6;                   //数据灯
+  11          sbit LED7 = P0 ^ 7;                   //计时灯
+  12          uchar level[2][6] = {0X00}, mesg[6];  //占空比level+协议变量mesg
+  13          uchar code Fback[2][8] = {"SUCCED!", "ERROR!"};
+  14          uchar time, a;
+  15          static bit uart_flag, error_flag,model_flag = 0,x = 0;  //使用位变量节省空间,模式默认为0普�
+             -��4led,x作为亮度级别行数，0行普通4LED，1行8LED流水灯,
+  16          static uchar count;  //串口接收计数的静态变量初始值为0
+  17          //主函数
+  18          void main() {
+  19   1          Timer0_Init();
+  20   1          Timer1_Init();
+  21   1          Timer2_Init();
+  22   1          while (1) {
+  23   2              send();
+  24   2              //if (model_flag == 1) {
+  25   2                  //Breath_Light();  //开启流水灯
+  26   2              //}
+  27   2          }
+  28   1      }
+  29          //定时器0中断固定脉宽PWM输出
+  30          void Timer0() interrupt 1 {
+  31   1          TR0 = 0;  //赋初值时，关闭定时器
+  32   1          TH0 = 0XFF;
+  33   1          TL0 = 0Xb8;
+  34   1          TR0 = 1;  //打开定时器
+  35   1          time++;
+  36   1          //占空比light
+  37   1        if(time < level[x][1])
+  38   1              P0=0XFF;
+  39   1          //清零time
+  40   1          if (time == 0xFF) {
+  41   2              time = 0x00;
+  42   2          }
+  43   1      }
+  44          
+  45          //串口中断，先接收8个字节至mesg数组保存，最后在主函数处理数据
+  46          void UART_SER() interrupt 4 {
+  47   1          RI = 0;  //手动清寄存器（数据接收完成自动置1）
+  48   1          mesg[count] = SBUF;
+  49   1          //同时判断count跟收到的数据
+  50   1          if (count == 0 && mesg[count] == 0xAA) {
+  51   2              count = 1;
+  52   2          } else if (count == 1) {
+  53   2              count = 2;
+C51 COMPILER V9.60.0.0   MAIN3                                                             12/06/2021 22:03:48 PAGE 2   
+
+  54   2          } else if (count == 2) {
+  55   2              count = 3;
+  56   2          } else if (count == 3) {
+  57   2              count = 4;
+  58   2          } else if (count == 4) {
+  59   2              count = 5;
+  60   2          } else if (count == 5 && mesg[count] == 0x55)  //检验固定的帧尾
+  61   1          {
+  62   2              count = 0;
+  63   2              uart_flag = 1;  //串口接收成功标志，为1时在主程序中回复，然后清零
+  64   2              ES = 0;  //关中断，回复完了再ES=1;
+  65   2          } else {
+  66   2              count = 0;       //判断不满足条件就将计数值清零
+  67   2              error_flag = 1;  //头数据不通过
+  68   2          }
+  69   1          LED6 = ~LED6;
+  70   1          resettime();  //进入监控
+  71   1      }
+  72          //超时中断50ms*400==20s
+  73          void T2_Time() interrupt 5 {
+  74   1          static unsigned short run;
+  75   1          TF2 = 0;  //手动标志位清零
+  76   1          LED7 = 0;
+  77   1          run++;
+  78   1          if (run == 400) {
+  79   2              if (uart_flag != 1) {
+  80   3                  error_flag = 1;  //时间到未完整传输，发送失败提示
+  81   3              }
+  82   2              count = 0;  //清零
+  83   2              LED7 = 1;   //关闭状态指示灯
+  84   2              LED6 = 1;   //关闭数据传输灯
+  85   2              run = 0;
+  86   2              TR2 = 0;  //只要计时到关闭监控，等待resettime()下一次开启
+  87   2          }
+  88   1      }
+  89          //定时器0初始化
+  90          void Timer0_Init() {
+  91   1          TMOD |= 0x01;  //定时器0工作方式1
+  92   1          TH0 = 0XFF;
+  93   1          TL0 = 0Xb8;
+  94   1          ET0 = 1;  //开定时器0中断
+  95   1          TR0 = 1;  //启动定时器0
+  96   1          EA = 1;   //开总中断
+  97   1      }
+  98          //定时器1初始化
+  99          void Timer1_Init() {
+ 100   1          SCON = 0x50;  // sm0sm1=01，串口工作方式1，10位=8为数据+1位开始+1位停止
+ 101   1          TMOD |= 0x20;
+ 102   1          TH1 = 0xfd;  //波特率9600
+ 103   1          TL1 = 0xfd;
+ 104   1          TR1 = 1;
+ 105   1          ES = 1;  //串口使能
+ 106   1          PS = 1;  //串口中断优先级
+ 107   1          EA = 1;
+ 108   1      }
+ 109          //定时器2初始化50ms
+ 110          void Timer2_Init() {
+ 111   1          T2MOD = 0;   //初始化模式寄存器
+ 112   1          T2CON = 0;   //初始化控制寄存器
+ 113   1          TH2 = 0x4C;  //设置定时初始值50ms
+ 114   1          TL2 = 0x00;
+ 115   1          RCAP2H = 0x4C;  //设置定时重载值
+C51 COMPILER V9.60.0.0   MAIN3                                                             12/06/2021 22:03:48 PAGE 3   
+
+ 116   1          RCAP2L = 0x00;  //设置定时重载值
+ 117   1          TR2 = 0;        //定时器2默认关闭
+ 118   1          ET2 = 1;        //开定时器2中断
+ 119   1          EA = 1;
+ 120   1      }
+ 121          void send() {
+ 122   1          uchar i;
+ 123   1          //成功反馈(发送+处理)
+ 124   1          if (uart_flag == 1) {
+ 125   2              ES = 0;
+ 126   2              for (i = 0; i < 8; i++) {
+ 127   3                  SBUF = Fback[0][i];
+ 128   3                  while (!TI)
+ 129   3                      ;
+ 130   3                  TI = 0;  //发送中断请求标志位
+ 131   3              }
+ 132   2              ES = 1;
+ 133   2              uart_flag = 0;
+ 134   2              make();  //处理数据
+ 135   2          }
+ 136   1          //失败反馈（头尾检测不通过或者超时）
+ 137   1          if (error_flag == 1) {
+ 138   2              ES = 0;
+ 139   2              for (i = 0; i < 8; i++) {
+ 140   3                  SBUF = Fback[1][i];
+ 141   3                  while (!TI)
+ 142   3                      ;
+ 143   3                  TI = 0;  //发送中断请求标志位
+ 144   3              }
+ 145   2              ES = 1;
+ 146   2              error_flag = 0;  //恢复状态
+ 147   2          }
+ 148   1      }
+ 149          //数据处理（占空比赋值）（模式切换靠数据解析）
+ 150          void make() {
+ 151   1          if (mesg[1] == 0XBB & mesg[2] == 0XCC && mesg[3] == 0XDD &&
+ 152   1              mesg[4] == 0XEE) {
+ 153   2              model_flag = 1;  //开启流水灯
+ 154   2      
+ 155   2          } else {
+ 156   2              for (a = 0; a < 4; a++) {
+ 157   3                  ET0 = 0;  //关定时器0
+ 158   3                  level[0][a] = mesg[a + 1];
+ 159   3                  ET0 = 1;         //开定时器0
+ 160   3                  model_flag = 0;  //关闭流水灯
+ 161   3              }
+ 162   2          }
+ 163   1      }
+ 164          //超时处理开启
+ 165          void resettime() {
+ 166   1          TR2 = 0;  //关闭定时器2
+ 167   1          if (count != 0) {
+ 168   2              TR2 = 1;  //打开定时器2
+ 169   2          }
+ 170   1      }
+ 171          // P0口八个led灯同时控制呼吸，循环一个灯闪烁。（需要通信协议AABBCCDDEEFF）
+ 172          //滑动呼吸灯
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    530    ----
+   CONSTANT SIZE    =     16    ----
+C51 COMPILER V9.60.0.0   MAIN3                                                             12/06/2021 22:03:48 PAGE 4   
+
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     23       1
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =      4    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
